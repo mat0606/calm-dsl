@@ -1,0 +1,17 @@
+|-
+#cloud-config
+disable_root: False
+ssh_enabled: True
+disable_root: False
+ssh_enabled: True
+users:
+  - name: centos
+    passwd: @@{Centos 2 Credential.secret}@@
+    ssh-authorized-keys:
+      - @@{CENTOS.public_key}@@
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+
+#cloud-config
+fqdn: @@{name}@@.@@{domain_name}@@
+manage_etc_hosts: true
+hostname: @@{name}@@
