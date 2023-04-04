@@ -13,7 +13,7 @@ from .library_tasks import TaskLibraryApi
 from .application import ApplicationAPI
 from .project import ProjectAPI
 from .environment import EnvironmentAPI
-from .setting import SettingAPI
+from .setting import AccountsAPI
 from .marketplace import MarketPlaceAPI
 from .app_icons import AppIconAPI
 from .version import VersionAPI
@@ -23,7 +23,13 @@ from .user_group import UserGroupAPI
 from .role import RoleAPI
 from .directory_service import DirectoryServiceAPI
 from .access_control_policy import AccessControlPolicyAPI
-from .environment import EnvironmentAPI
+from .app_protection_policy import AppProtectionPolicyAPI
+from .job import JobAPI
+from .tunnel import TunnelAPI
+from .vm_recovery_point import VmRecoveryPointAPI
+from .nutanix_task import TaskAPI
+from .network_group import NetworkGroupAPI
+from .resource_type import ResourceTypeAPI
 
 
 class ClientHandle:
@@ -42,7 +48,7 @@ class ClientHandle:
         self.runbook = RunbookAPI(self.connection)
         self.task = TaskLibraryApi(self.connection)
         self.application = ApplicationAPI(self.connection)
-        self.account = SettingAPI(self.connection)
+        self.account = AccountsAPI(self.connection)
         self.market_place = MarketPlaceAPI(self.connection)
         self.app_icon = AppIconAPI(self.connection)
         self.version = VersionAPI(self.connection)
@@ -53,6 +59,13 @@ class ClientHandle:
         self.directory_service = DirectoryServiceAPI(self.connection)
         self.acp = AccessControlPolicyAPI(self.connection)
         self.environment = EnvironmentAPI(self.connection)
+        self.app_protection_policy = AppProtectionPolicyAPI(self.connection)
+        self.job = JobAPI(self.connection)
+        self.tunnel = TunnelAPI(self.connection)
+        self.vm_recovery_point = VmRecoveryPointAPI(self.connection)
+        self.nutanix_task = TaskAPI(self.connection)
+        self.network_group = NetworkGroupAPI(self.connection)
+        self.resource_types = ResourceTypeAPI(self.connection)
 
 
 def get_client_handle_obj(

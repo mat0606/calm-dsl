@@ -10,7 +10,9 @@ from calm.dsl.log import get_logging_handle
 LOG = get_logging_handle(__name__)
 
 
-def render_task_template(cls, entity_context="", RUNBOOK_ACTION_MAP={}):
+def render_task_template(
+    cls, entity_context="", RUNBOOK_ACTION_MAP={}, CONFIG_SPEC_MAP={}
+):
 
     LOG.debug("Rendering {} task template".format(cls.name))
     if not isinstance(cls, TaskType):
@@ -114,6 +116,9 @@ def render_task_template(cls, entity_context="", RUNBOOK_ACTION_MAP={}):
         user_attrs["response_paths"] = attrs.get("response_paths", {})
         method = attrs["method"]
 
+        if (method == "POST" or method == "PUT") and not cls.attrs["request_body"]:
+            cls.attrs["request_body"] = {}
+
         if method == "GET":
             schema_file = "task_http_get.py.jinja2"
 
@@ -139,8 +144,17 @@ def render_task_template(cls, entity_context="", RUNBOOK_ACTION_MAP={}):
         }
         schema_file = "task_call_runbook.py.jinja2"
 
+    elif cls.type == "CALL_CONFIG":
+        config_name = cls.attrs["config_spec_reference"]
+        user_attrs = {
+            "name": cls.name,
+            "config": CONFIG_SPEC_MAP[config_name]["global_name"],
+        }
+        schema_file = "task_call_config.py.jinja2"
+
     else:
-        raise Exception("Invalid task type")
+        LOG.error("Task type does not match any known types")
+        sys.exit("Invalid task task")
 
     text = render_template(schema_file=schema_file, obj=user_attrs)
     return text.strip()

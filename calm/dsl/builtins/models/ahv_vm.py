@@ -1,6 +1,12 @@
+import sys
+
+from .calm_ref import Ref
 from .entity import EntityType, Entity
 from .validator import PropertyValidator
 from .provider_spec import ProviderSpecType
+from calm.dsl.log import get_logging_handle
+
+LOG = get_logging_handle(__name__)
 
 # AHV VM Resources
 
@@ -41,7 +47,7 @@ class AhvVmResourcesType(EntityType):
 
         # Merging boot_type to boot_config
         cdict["boot_config"] = boot_config
-        boot_type = cdict.pop("boot_type")
+        boot_type = cdict.pop("boot_type", None)
         if boot_type == "UEFI":
             cdict["boot_config"]["boot_type"] = "UEFI"
 
@@ -49,16 +55,21 @@ class AhvVmResourcesType(EntityType):
             cdict.pop("boot_config", None)
 
         serial_port_list = []
-        for ind, connection_status in cdict["serial_port_list"].items():
-            if not isinstance(ind, int):
-                raise TypeError("index {} is not of type integer".format(ind))
+        if cdict.get("serial_port_list"):
+            for ind, connection_status in cdict["serial_port_list"].items():
+                if not isinstance(ind, int):
+                    raise TypeError("index {} is not of type integer".format(ind))
 
-            if not isinstance(connection_status, bool):
-                raise TypeError(
-                    "connection status {} is not of type bool".format(connection_status)
+                if not isinstance(connection_status, bool):
+                    raise TypeError(
+                        "connection status {} is not of type bool".format(
+                            connection_status
+                        )
+                    )
+
+                serial_port_list.append(
+                    {"index": ind, "is_connected": connection_status}
                 )
-
-            serial_port_list.append({"index": ind, "is_connected": connection_status})
 
         cdict["serial_port_list"] = serial_port_list
 
@@ -116,6 +127,44 @@ class AhvVmType(ProviderSpecType):
 
         if "__name__" in cdict:
             cdict["__name__"] = "{}{}".format(prefix, cdict["__name__"])
+
+        return cdict
+
+    def compile(cls):
+        cdict = super().compile()
+        vpc_name, network_type = None, None
+
+        for nic in cdict["resources"].nics:
+            if nic.vpc_reference:
+                if not network_type:
+                    network_type = "OVERLAY"
+                elif network_type != "OVERLAY":
+                    LOG.error(
+                        "Network type mismatch - all subnets must either be vLANs or overlay subnets"
+                    )
+                    sys.exit("Network type mismatch")
+                if "@@{" not in nic.vpc_reference["name"]:
+                    if not vpc_name:
+                        vpc_name = nic.vpc_reference["name"]
+                    elif vpc_name != nic.vpc_reference["name"]:
+                        LOG.error(
+                            "VPC mismatch - all overlay subnets should belong to the same VPC"
+                        )
+                        sys.exit("VPC mismatch")
+
+            if nic.subnet_reference and nic.subnet_reference["cluster"]:
+                if not network_type:
+                    network_type = "VLAN"
+                elif network_type != "VLAN":
+                    LOG.error(
+                        "Network type mismatch - all subnets must either be vLANs or overlay subnets"
+                    )
+                    sys.exit("Network type mismatch")
+
+                # if not cdict["cluster_reference"]:
+                #    cluster = Ref.Cluster(name=nic.subnet_reference["cluster"])
+                #    cdict["cluster_reference"] = cluster
+                #    cls.cluster = cluster
 
         return cdict
 

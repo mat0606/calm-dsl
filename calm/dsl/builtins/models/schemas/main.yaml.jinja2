@@ -3,6 +3,8 @@
 {% import "provider_spec.yaml.jinja2" as provider_spec %}
 {% import "substrate.yaml.jinja2" as substrate %}
 {% import "deployment.yaml.jinja2" as deployment %}
+{% import "config_attrs.yaml.jinja2" as config_attrs %}
+{% import "config_spec.yaml.jinja2" as config_spec %}
 {% import "profile.yaml.jinja2" as profile %}
 {% import "blueprint.yaml.jinja2" as blueprint %}
 {% import "blueprint_payload.yaml.jinja2" as blueprint_payload %}
@@ -38,10 +40,19 @@
 {% import "vm_blueprint.yaml.jinja2" as vm_blueprint %}
 {% import "calm_ref.yaml.jinja2" as calm_ref %}
 {% import "account_provider.yaml.jinja2" as account_provider %}
-
-
+{% import "ahv_recovery_vm.yaml.jinja2" as ahv_recovery_vm %}
+{% import "jobs.yaml.jinja2" as scheduler_job %}
+{% import "jobexecutable.yaml.jinja2" as job_executable %}
+{% import "jobscheduleinfo.yaml.jinja2" as job_schedule %}
+{% import "network_group_tunnel.yaml.jinja2" as network_group_tunnel %}
+{% import "network_group_tunnel_payload.yaml.jinja2" as network_group_tunnel_payload %}
 {% macro Schemas() -%}
 
+{{ config_attrs.AhvDiskRulesetSchema() }}
+{{ config_attrs.AhvNicRulesetSchema() }}
+{{ config_attrs.PatchDataFieldSchema() }}
+{{ config_attrs.ConfigAttrsSchema() }}
+{{ config_spec.ConfigSpecSchema() }}
 {{ port.PortSchema() }}
 {{ service.ServiceSchema() }}
 {{ published_service.PublishedServiceSchema() }}
@@ -82,7 +93,14 @@
 {{ vm_blueprint.VmBlueprintSchema() }}
 {{ calm_ref.CalmRefSchema() }}
 {{ account_provider.AccountProviderSchema() }}
-
+{{ ahv_recovery_vm.AhvRecoveryVmSchema() }}
+{{ job_executable.JobExecutableSchema() }}
+{{ job_schedule.JobScheduleInfoSchema() }}
+{{ scheduler_job.SchedulerJobSchema() }}
+{{ network_group_tunnel.NetworkGroupTunnelVMSpecSchema() }}
+{{ network_group_tunnel.NetworkGroupTunnelSchema() }}
+{{ network_group_tunnel_payload.NetworkGroupTunnelPayloadSchema() }}
+{{ network_group_tunnel_payload.NetworkGroupTunnelVMPayloadSchema() }}
 {%- endmacro %}
 
 

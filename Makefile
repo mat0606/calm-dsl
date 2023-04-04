@@ -3,6 +3,7 @@ VERSION := $(shell git describe --abbrev=0 --tags 2>/dev/null || cat CalmVersion
 COMMIT  := $(shell git rev-parse --short HEAD)
 TAG     := $(shell git describe --abbrev=0 --tags --exact-match ${COMMIT} 2>/dev/null \
 		|| echo ${VERSION}.$(shell date +"%Y.%m.%d").commit.${COMMIT})
+RELEASE_VERSION :=  v$(shell cat CalmVersion)
 
 dev:
 	# Setup our python3 based virtualenv
@@ -37,7 +38,7 @@ clean:
 	[ -S /var/run/docker.sock ] && \
 		docker ps -aq --no-trunc --filter "status=exited" | xargs -I {} docker rm {} && \
 		docker image prune -f
-	rm -r venv/ && mkdir venv/ && touch venv/.empty
+	rm -rf venv/ && mkdir venv/ && touch venv/.empty
 
 test-verbose: dev
 	venv/bin/py.test -s -vv
@@ -55,6 +56,12 @@ docker: dist
 		docker build . --rm --file Dockerfile --tag ${NAME}:${TAG} --build-arg tag=${TAG} && \
 		docker tag ${NAME}:${TAG} ${NAME}:latest
 
+release-docker: dist
+
+	[ -S /var/run/docker.sock ] && \
+		docker build . --rm --file Dockerfile --tag ${NAME}:${TAG} --build-arg tag=${TAG} && \
+		docker tag ${NAME}:${TAG} ${NAME}:${RELEASE_VERSION}
+
 black:
 	black .
 
@@ -63,7 +70,8 @@ run:
 
 _init_centos:
 	# Lets get python3 in
-	rpm -q epel-release || sudo yum -y install epel-release openssl-devel
+	rpm -q epel-release || sudo yum -y install epel-release
+	sudo yum -y install openssl-devel sqlite-devel ncurses-devel
 	# Not needed: This has a modern git
 	# rpm -q wandisco-git-release || sudo yum install -y http://opensource.wandisco.com/centos/7/git/x86_64/wandisco-git-release-7-2.noarch.rpm || :
 	#sudo yum update -y git || :

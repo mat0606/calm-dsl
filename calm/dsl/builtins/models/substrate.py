@@ -5,7 +5,7 @@ from .entity import EntityType, Entity, EntityTypeBase, EntityDict
 from .validator import PropertyValidator
 from .readiness_probe import readiness_probe
 from .provider_spec import provider_spec
-from .ahv_vm import AhvVmType
+from .ahv_vm import AhvVmType, ahv_vm
 from .client_attrs import update_dsl_metadata_map, get_dsl_metadata_map
 from .metadata_payload import get_metadata_obj
 from .helper import common as common_helper
@@ -93,6 +93,8 @@ class SubstrateType(EntityType):
         calm_version = Version.get_version("Calm")
         provider_type = getattr(cls, "provider_type")
         provider_account_type = PROVIDER_ACCOUNT_TYPE_MAP.get(provider_type, "")
+        if not provider_account_type:
+            return ""
 
         # Fetching project data
         project_cache_data = common_helper.get_cur_context_project()
@@ -100,6 +102,13 @@ class SubstrateType(EntityType):
         project_accounts = project_cache_data.get("accounts_data", {}).get(
             provider_account_type, []
         )
+        if not project_accounts:
+            LOG.error(
+                "No '{}' account registered to project '{}'".format(
+                    provider_account_type, project_name
+                )
+            )
+            sys.exit(-1)
 
         # If substrate is defined in blueprint file
         cls_bp = common_helper._walk_to_parent_with_given_type(cls, "BlueprintType")
@@ -219,9 +228,10 @@ class SubstrateType(EntityType):
                 elif not provider_account:
                     provider_account = whitelisted_account
 
-            # If version is less than 3.2.0, then it should use account from poroject only
-            else:
-                provider_account = {"uuid": project_accounts[0], "kind": "account"}
+        # If version is less than 3.2.0, then it should use account from poroject only, OR
+        # If no account is supplied, will take 0th account in project (in both case of blueprint/environment)
+        if not provider_account:
+            provider_account = {"uuid": project_accounts[0], "kind": "account"}
 
         return provider_account["uuid"]
 
@@ -258,12 +268,28 @@ class SubstrateType(EntityType):
             if not readiness_probe_dict.get("connection_protocol", ""):
                 readiness_probe_dict["connection_protocol"] = "http"
 
-        # Fill out address for readiness probe if not given
+        if cdict.get("vm_recovery_spec", {}) and cdict["type"] != "AHV_VM":
+            LOG.error(
+                "Recovery spec is supported only for AHV_VM substrate (given {})".format(
+                    cdict["type"]
+                )
+            )
+            sys.exit("Unknown attribute vm_recovery_spec given")
+
+        # Handle cases for empty readiness_probe and vm_recovery_spec
         if cdict["type"] == "AHV_VM":
             if not readiness_probe_dict.get("address", ""):
                 readiness_probe_dict[
                     "address"
                 ] = "@@{platform.status.resources.nic_list[0].ip_endpoint_list[0].ip}@@"
+
+            if cdict.get("vm_recovery_spec", {}):
+                _vrs = cdict.pop("vm_recovery_spec", None)
+                if _vrs:
+                    cdict["create_spec"] = ahv_vm(
+                        name=_vrs.vm_name, resources=_vrs.vm_override_resources
+                    )
+                    cdict["recovery_point_reference"] = _vrs.recovery_point
 
         elif cdict["type"] == "EXISTING_VM":
             if not readiness_probe_dict.get("address", ""):
@@ -295,6 +321,9 @@ class SubstrateType(EntityType):
 
         else:
             raise Exception("Un-supported vm type :{}".format(cdict["type"]))
+
+        if not cdict.get("vm_recovery_spec", {}):
+            cdict.pop("vm_recovery_spec", None)
 
         # Adding min defaults in vm spec required by each provider
         if not cdict.get("create_spec"):
@@ -374,38 +403,118 @@ class SubstrateType(EntityType):
         # In case we have read provider_spec from a yaml file, validate that we have consistent values for
         # Substrate.account (if present) and account_uuid in provider_spec (if present).
         # The account_uuid mentioned in provider_spec yaml should be a registered PE under the Substrate.account PC
-        pc_account_ref = cdict.pop("account_reference", None)
-        if pc_account_ref and cdict["type"] == "AHV_VM":
-            try:
-                pe_account_uuid = cdict["create_spec"]["resources"]["account_uuid"]
-            except (AttributeError, TypeError, KeyError):
-                pass
-            else:
-                if pe_account_uuid:
-                    account_cache_data = Cache.get_entity_data_using_uuid(
-                        entity_type="account", uuid=pc_account_ref["uuid"]
-                    )
-                    if not account_cache_data:
-                        LOG.error(
-                            "Account (uuid={}) not found. Please update cache".format(
-                                pc_account_ref["uuid"]
-                            )
-                        )
-                        sys.exit(-1)
 
+        substrate_account_uuid = cls.get_referenced_account_uuid()
+        spec_account_uuid = ""
+        try:
+            spec_account_uuid = cdict["create_spec"]["resources"]["account_uuid"]
+        except (AttributeError, TypeError, KeyError):
+            pass
+
+        if substrate_account_uuid:
+            account_cache_data = Cache.get_entity_data_using_uuid(
+                entity_type="account", uuid=substrate_account_uuid
+            )
+            if not account_cache_data:
+                LOG.error(
+                    "Account (uuid={}) not found. Please update cache".format(
+                        substrate_account_uuid
+                    )
+                )
+                sys.exit(-1)
+            account_name = account_cache_data["name"]
+
+            if spec_account_uuid:
+                if cdict["type"] == "AHV_VM":
                     if (
                         not account_cache_data.get("data", {})
                         .get("clusters", {})
-                        .get(pe_account_uuid)
+                        .get(spec_account_uuid)
                     ):
                         LOG.error(
                             "cluster account_uuid (uuid={}) used in the provider spec is not found to be registered"
                             " under the Nutanix PC account {}. Please update cache".format(
-                                pe_account_uuid, account_cache_data["name"]
+                                spec_account_uuid, account_name
                             )
                         )
                         sys.exit(-1)
 
+                elif cdict["type"] != "EXISTING_VM":
+                    if spec_account_uuid != substrate_account_uuid:
+                        LOG.error(
+                            "Account '{}'(uuid='{}') not matched with account_uuid used in provider-spec (uuid={})".format(
+                                account_name, substrate_account_uuid, spec_account_uuid
+                            )
+                        )
+                        sys.exit(-1)
+
+            else:
+                # if account_uuid is not available add it
+                if cdict["type"] == "AHV_VM":
+
+                    # default is first cluster account
+                    account_uuid = list(account_cache_data["data"]["clusters"].keys())[
+                        0
+                    ]
+
+                    _cs = cdict["create_spec"]
+
+                    if isinstance(_cs, AhvVmType):
+                        # NOTE: We cann't get subnet_uuid here, as it involved parent reference
+                        subnet_name = ""
+                        cluster_name = _cs.cluster or ""
+                        _nics = _cs.resources.nics
+                        if cluster_name:
+                            account_uuid = common_helper.get_pe_account_using_pc_account_uuid_and_cluster_name(
+                                pc_account_uuid=substrate_account_uuid,
+                                cluster_name=cluster_name,
+                            )
+                        else:
+                            for _nic in _nics:
+                                _nic_dict = _nic.subnet_reference.get_dict()
+                                if _nic_dict["cluster"] and not common_helper.is_macro(
+                                    _nic_dict["name"]
+                                ):
+                                    subnet_name = _nic_dict["name"]
+                                    cluster_name = _nic_dict["cluster"]
+                                    break
+
+                            # calm_version = Version.get_version("Calm")
+                            # if LV(calm_version) >= LV("3.5.0") and not cluster_name:
+                            #    raise Exception("Unable to infer cluster for vm")
+                            if subnet_name:
+                                account_uuid = common_helper.get_pe_account_uuid_using_pc_account_uuid_and_nic_data(
+                                    pc_account_uuid=substrate_account_uuid,
+                                    subnet_name=subnet_name,
+                                    cluster_name=cluster_name,
+                                )
+
+                        # Assigning the pe account uuid to ahv vm resources
+                        _cs.resources.account_uuid = account_uuid
+
+                    else:
+                        subnet_uuid = ""
+                        _nics = _cs.get("resources", {}).get("nic_list", [])
+
+                        for _nic in _nics:
+                            _nu = _nic["subnet_reference"].get("uuid", "")
+                            if _nu and not common_helper.is_macro(_nu):
+                                subnet_uuid = _nu
+                                break
+
+                        if subnet_uuid:
+                            account_uuid = common_helper.get_pe_account_uuid_using_pc_account_uuid_and_subnet_uuid(
+                                pc_account_uuid=substrate_account_uuid,
+                                subnet_uuid=subnet_uuid,
+                            )
+
+                        cdict["create_spec"]["resources"]["account_uuid"] = account_uuid
+
+        # Add account uuid for non-ahv providers
+        if cdict["type"] not in ["EXISTING_VM", "AHV_VM", "K8S_POD"]:
+            cdict["create_spec"]["resources"]["account_uuid"] = substrate_account_uuid
+
+        cdict.pop("account_reference", None)
         cdict["readiness_probe"] = readiness_probe_dict
 
         return cdict

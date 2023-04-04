@@ -9,6 +9,10 @@ from calm.dsl.cli import main as cli
 from calm.dsl.config import get_context
 from calm.dsl.log import get_logging_handle
 
+# for tcs
+from calm.dsl.store import Version
+from distutils.version import LooseVersion as LV
+
 # Setting the recursion limit to max for
 sys.setrecursionlimit(100000)
 
@@ -119,9 +123,13 @@ class TestVmBlueprints:
         bp_json = json.loads(result.output)
         generated_json = bp_json["spec"]["resources"]
         generated_json["client_attrs"] = {}
+        for profile in generated_json["app_profile_list"]:
+            profile.pop("snapshot_config_list", None)
+            profile.pop("restore_config_list", None)
+            profile.pop("patch_list", None)
         known_json = json.loads(open(bp_output_file_path).read())
 
-        # Replaces ahv images and nic & uuids
+        # Replaces ahv images and nic & uuids and account_uuid
         for ind, sub in enumerate(known_json["substrate_definition_list"]):
             sub["create_spec"]["resources"]["nic_list"] = generated_json[
                 "substrate_definition_list"
@@ -129,5 +137,15 @@ class TestVmBlueprints:
             sub["create_spec"]["resources"]["disk_list"] = generated_json[
                 "substrate_definition_list"
             ][ind]["create_spec"]["resources"]["disk_list"]
+            sub["create_spec"]["resources"]["account_uuid"] = generated_json[
+                "substrate_definition_list"
+            ][ind]["create_spec"]["resources"]["account_uuid"]
+
+        # calm_version
+        CALM_VERSION = Version.get_version("Calm")
+        # For versions > 3.4, cred_class is needed to cred-payload
+        if LV(CALM_VERSION) >= LV("3.4.0"):
+            for cred in known_json["credential_definition_list"]:
+                cred["cred_class"] = "static"
 
         assert generated_json == known_json

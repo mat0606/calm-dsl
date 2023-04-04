@@ -1,9 +1,14 @@
 import sys
 import uuid
 
+from calm.dsl.db.table_config import AhvSubnetsCache
+
 from .entity import Entity, EntityType
 from .validator import PropertyValidator
 from .helper import common as common_helper
+
+from .ahv_vm_cluster import AhvCluster
+from .ahv_vm_vpc import AhvVpc
 
 from calm.dsl.store import Cache
 from calm.dsl.constants import CACHE
@@ -53,15 +58,15 @@ class Ref:
 
     class Subnet:
         def __new__(cls, **kwargs):
-
             kwargs["__ref_cls__"] = cls
             return _calm_ref(**kwargs)
 
         def compile(cls, name, **kwargs):
 
             cluster = kwargs.get("cluster")
+            vpc = kwargs.get("vpc")
             account_uuid = kwargs.get("account_uuid")
-
+            subnet_cache_data = None
             try:
                 provider_obj = cls.__parent__
                 subnet_account = provider_obj.account_reference.get_dict()
@@ -70,11 +75,9 @@ class Ref:
             except Exception:
                 pass
 
-            subnet_cache_data = Cache.get_entity_data(
-                entity_type=CACHE.ENTITY.AHV_SUBNET,
-                name=name,
-                cluster=cluster,
-                account_uuid=account_uuid,
+            LOG.debug("Searching for subnet with name: {}".format(name))
+            subnet_cache_data = AhvSubnetsCache.get_entity_data(
+                name, cluster=cluster, vpc=vpc, account_uuid=account_uuid
             )
 
             if not subnet_cache_data:
@@ -188,8 +191,9 @@ class Ref:
 
             project_cache_data = common_helper.get_cur_context_project()
             project_name = project_cache_data.get("name")
+            project_uuid = project_cache_data.get("uuid")
             environment_cache_data = Cache.get_entity_data(
-                entity_type="environment", name=name, project=project_name
+                entity_type="environment", name=name, project_uuid=project_uuid
             )
             if not environment_cache_data:
                 LOG.error(
@@ -272,3 +276,227 @@ class Ref:
             )
 
             return vm_ref
+
+    class RecoveryPoint:
+        def __new__(cls, **kwargs):
+
+            kwargs["__ref_cls__"] = cls
+            return _calm_ref(**kwargs)
+
+        def compile(cls, name=None, **kwargs):
+
+            cls_substrate = common_helper._walk_to_parent_with_given_type(
+                cls, "SubstrateType"
+            )
+            account_uuid = (
+                cls_substrate.get_referenced_account_uuid() if cls_substrate else ""
+            )
+            account_uuid = account_uuid or kwargs.get("account_uuid", "")
+            if not account_uuid:
+                LOG.error("Account uuid not found")
+                sys.exit("Account not found for vm recovery point")
+
+            vrs_uuid = kwargs.get("uuid", "")
+            payload = {"filter": "account_uuid=={}".format(account_uuid)}
+            if vrs_uuid:
+                payload["filter"] += ";uuid=={}".format(vrs_uuid)
+            else:
+                payload["filter"] += ";name=={}".format(name)
+
+            client = get_api_client()
+            vrc_map = client.vm_recovery_point.get_name_uuid_map(payload)
+
+            if not vrc_map:
+                log_msg = "No recovery point found with " + (
+                    "uuid='{}'".format(vrs_uuid)
+                    if vrs_uuid
+                    else "name='{}'".format(name)
+                )
+                LOG.error(log_msg)
+                sys.exit("No recovery point found")
+
+            # there will be single key
+            vrc_name = list(vrc_map.keys())[0]
+            vrc_uuid = vrc_map[vrc_name]
+
+            if isinstance(vrc_uuid, list):
+                LOG.error(
+                    "Multiple recovery points found with name='{}'. Please provide uuid.".format(
+                        vrc_name
+                    )
+                )
+                LOG.debug("Found recovery point uuids: {}".format(vrc_uuid))
+                sys.exit("Multiple recovery points found")
+
+            return {
+                "kind": "vm_recovery_point",
+                "name": vrc_name,
+                "uuid": vrc_uuid,
+            }
+
+    class Cluster:
+        def __new__(cls, name=None, account_name=None, **kwargs):
+
+            kwargs["__ref_cls__"] = cls
+            kwargs["account_name"] = account_name
+            kwargs["name"] = name
+            return _calm_ref(**kwargs)
+
+        def compile(cls, name=None, **kwargs):
+
+            if name.startswith("@@{") and name.endswith("}@@"):
+                return {"kind": "cluster", "uuid": name}
+            account_name = kwargs.get("account_name", None)
+            if account_name:
+                cache_acc_data = Cache.get_entity_data(
+                    CACHE.ENTITY.ACCOUNT, account_name
+                )
+                if not cache_acc_data:
+                    LOG.error(
+                        "Failed to find account with name: {}".format(account_name)
+                    )
+                    sys.exit("Account name={} not found.".format(account_name))
+
+                # We found the account
+                cache_cluster_data = Cache.get_entity_data(
+                    CACHE.ENTITY.AHV_CLUSTER, name, account_uuid=cache_acc_data["uuid"]
+                )
+                if not cache_cluster_data:
+                    LOG.error(
+                        "Failed to find cluster with name: {}, account: {}".format(
+                            name, account_name
+                        )
+                    )
+                    sys.exit("Cluster name={} not found".format(name))
+                return {
+                    "kind": "cluster",
+                    "name": cache_cluster_data["name"],
+                    "uuid": cache_cluster_data["uuid"],
+                }
+            else:
+                cdict = AhvCluster(name).compile()
+                return {
+                    "kind": "cluster",
+                    "name": cdict["name"],
+                    "uuid": cdict["uuid"],
+                }
+
+    class Vpc:
+        def __new__(cls, name=None, account_name=None, **kwargs):
+
+            kwargs["__ref_cls__"] = cls
+            kwargs["account_name"] = account_name
+            kwargs["name"] = name
+            return _calm_ref(**kwargs)
+
+        def compile(cls, name=None, **kwargs):
+
+            account_name = kwargs.get("account_name", "")
+            if account_name:
+
+                cache_acc_data = Cache.get_entity_data(
+                    CACHE.ENTITY.ACCOUNT, account_name
+                )
+                if not cache_acc_data:
+                    LOG.error(
+                        "Failed to find account with name: {}".format(account_name)
+                    )
+                    sys.exit("Account name={} not found.".format(account_name))
+
+                # We found the account
+                cache_vpc_data = Cache.get_entity_data(
+                    CACHE.ENTITY.AHV_VPC, name, account_uuid=cache_acc_data["uuid"]
+                )
+                if not cache_vpc_data:
+                    LOG.error(
+                        "Failed to find vpc with name: {}, account: {}".format(
+                            name, account_name
+                        )
+                    )
+                    sys.exit("VPC name={} not found".format(name))
+                return {
+                    "kind": "vpc",
+                    "name": cache_vpc_data["name"],
+                    "uuid": cache_vpc_data["uuid"],
+                }
+            else:
+                cdict = AhvVpc(name).compile()
+
+                return {
+                    "kind": "vpc",
+                    "name": cdict["name"],
+                    "uuid": cdict["uuid"],
+                }
+
+    class Resource_Type:
+        def __new__(cls, name, **kwargs):
+            kwargs["__ref_cls__"] = cls
+            kwargs["name"] = name
+            return _calm_ref(**kwargs)
+
+        def compile(cls, name, **kwargs):
+
+            client = get_api_client()
+
+            if name:
+                params = {"filter": "name=={}".format(name), "length": 250}
+                res, err = client.resource_types.list(params)
+                if err:
+                    LOG.error(err)
+                    sys.exit(-1)
+
+                res = res.json()
+                if res["metadata"]["total_matches"] == 0:
+                    LOG.error("No vm with name '{}' found".format(name))
+                    sys.exit(-1)
+
+                elif res["metadata"]["total_matches"] > 1:
+                    LOG.error(
+                        "Multiple resource type with same name found. "
+                        "Please provide resource type uuid"
+                    )
+                    sys.exit(-1)
+
+                resource_type_uuid = res["entities"][0]["status"]["uuid"]
+            else:
+                LOG.error(
+                    "Resource type name not passed, " "pls pass resource type name"
+                )
+                sys.exit(-1)
+
+            resource_type_ref = {
+                "uuid": resource_type_uuid,
+                "name": name,
+                "kind": "resource_type",
+            }
+
+            return resource_type_ref
+
+    class Tunnel:
+        def __new__(cls, name, **kwargs):
+            kwargs["__ref_cls__"] = cls
+            kwargs["name"] = name
+            return _calm_ref(**kwargs)
+
+        def compile(cls, name, **kwargs):
+            tunnel_uuid = ""
+            if name:
+                cache_vpc_data = Cache.get_entity_data(
+                    CACHE.ENTITY.AHV_VPC, None, tunnel_name=name
+                )
+                if not cache_vpc_data:
+                    LOG.error("Failed to find Tunnel with name: {}".format(name))
+                    sys.exit("Tunnel name={} not found".format(name))
+                tunnel_uuid = cache_vpc_data.get("tunnel_uuid")
+                LOG.debug("Tunnel UUID: {}".format(tunnel_uuid))
+            else:
+                LOG.error("Tunnel name not passed, " "pls pass Tunnel name")
+                sys.exit(-1)
+
+            tunnel_ref = {
+                "uuid": tunnel_uuid,
+                "name": name,
+                "kind": "tunnel",
+            }
+
+            return tunnel_ref

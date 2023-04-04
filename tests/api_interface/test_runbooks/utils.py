@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+from importlib_metadata import metadata
 import pytest
 
 import json
@@ -543,3 +544,15 @@ def get_runbook_dynamic_variable_values(runbook_uuid, var_uuid):
         time.sleep(10)
 
     return []
+
+
+def update_tunnel_and_project(tunnel_reference, project, endpoint_payload):
+    metadata = endpoint_payload["metadata"]
+    if metadata.get("project_reference", {}):
+        metadata["project_reference"]["name"] = project.get("name")
+        metadata["project_reference"]["uuid"] = project.get("uuid")
+
+    resources = endpoint_payload["spec"]["resources"]
+    if resources.get("tunnel_reference", {}):
+        resources["tunnel_reference"]["uuid"] = tunnel_reference.get("uuid")
+        resources["tunnel_reference"]["name"] = tunnel_reference.get("name")

@@ -66,6 +66,8 @@ class EntityDict(OrderedDict):
 
             elif isinstance(type(value), DescriptorType):
                 ValidatorType = None
+                # Set action_name attribute in action object
+                setattr(value, "action_name", name)
             is_array = False
 
         if ValidatorType is not None:
@@ -141,6 +143,7 @@ class EntityType(EntityTypeBase):
     @classmethod
     def validate_dict(cls, entity_dict):
         schema = {"type": "object", "properties": cls.__schema_props__}
+
         validator = StrictDraft7Validator(schema)
         validator.validate(entity_dict)
 
@@ -325,6 +328,16 @@ class EntityType(EntityTypeBase):
 
         return ncls.get_user_attrs()
 
+    def get_not_required_if_none_attrs(cls):
+        not_required_attrs = []
+        schema_props = cls.__schema_props__
+
+        for prop, value in schema_props.items():
+            if value.get("x-calm-dsl-not-required-if-none", False):
+                not_required_attrs.append(prop)
+
+        return not_required_attrs
+
     def clone(cls):
         """returns the clone (deepcopy) of the original class"""
 
@@ -412,6 +425,10 @@ class EntityType(EntityTypeBase):
         # Add extra info for roundtrip
         # TODO - remove during serialization before sending to server
         # cdict['__kind__'] = cls.__kind__
+        not_required_if_none_attrs = cls.get_not_required_if_none_attrs()
+        for attr in not_required_if_none_attrs:
+            if not cdict.get(attr):
+                cdict.pop(attr)
 
         return cdict
 

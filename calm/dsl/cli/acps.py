@@ -19,12 +19,63 @@ from .utils import get_name_query, highlight_text
 LOG = get_logging_handle(__name__)
 
 
+def get_acps_from_project(client, project_uuid, **kwargs):
+    """This routine gets acps from project using project uuid"""
+
+    # get project details
+    projects_intermal_obj = get_resource_api("projects_internal", client.connection)
+    proj_info, err = projects_intermal_obj.read(project_uuid)
+    if err:
+        return None, err
+
+    proj_info = proj_info.json()
+
+    # construct acp info dict
+    acps = {}
+    acps["entities"] = []
+    role_uuid = kwargs.get("role_uuid", None)
+    acp_name = kwargs.get("acp_name", None)
+    limit = kwargs.get("limit", 20)
+    offset = kwargs.get("offset", 0)
+
+    terminate = False
+    for acp in proj_info["status"]["access_control_policy_list_status"]:
+
+        # role uuid filter
+        if (
+            role_uuid
+            and role_uuid
+            != acp["access_control_policy_status"]["resources"]["role_reference"][
+                "uuid"
+            ]
+        ):
+            continue
+
+        # acp name filter
+        if acp_name and acp_name != acp["access_control_policy_status"]["name"]:
+            continue
+        elif acp_name:
+            terminate = True
+
+        (acps["entities"]).append(
+            {"status": acp["access_control_policy_status"], "metadata": acp["metadata"]}
+        )
+
+        if terminate:
+            break
+
+    acps["metadata"] = {"total_matches": len(acps["entities"])}
+
+    acps["entities"] = acps["entities"][offset : offset + limit]
+    return acps, None
+
+
 def get_acps(name, project_name, filter_by, limit, offset, quiet, out):
     """Get the acps, optionally filtered by a string"""
 
     client = get_api_client()
 
-    params = {"length": 1000}
+    params = {"length": 250, "filter": "name=={}".format(project_name)}
     project_name_uuid_map = client.project.get_name_uuid_map(params)
 
     project_uuid = project_name_uuid_map.get(project_name, "")
@@ -38,15 +89,18 @@ def get_acps(name, project_name, filter_by, limit, offset, quiet, out):
         filter_query = get_name_query([name])
     if filter_by:
         filter_query = filter_query + ";(" + filter_by + ")"
-    if project_uuid:
-        filter_query = filter_query + ";(project_reference=={})".format(project_uuid)
     if filter_query.startswith(";"):
         filter_query = filter_query[1:]
-
     if filter_query:
         params["filter"] = filter_query
 
-    res, err = client.acp.list(params=params)
+    if project_uuid:
+        res, err = get_acps_from_project(
+            client, project_uuid, limit=limit, offset=offset
+        )
+    else:
+        res, err = client.acp.list(params=params)
+        res = res.json()
 
     if err:
         ContextObj = get_context()
@@ -56,7 +110,6 @@ def get_acps(name, project_name, filter_by, limit, offset, quiet, out):
         LOG.warning("Cannot fetch acps from {}".format(pc_ip))
         return
 
-    res = res.json()
     total_matches = res["metadata"]["total_matches"]
     if total_matches > limit:
         LOG.warning(
@@ -83,7 +136,6 @@ def get_acps(name, project_name, filter_by, limit, offset, quiet, out):
     table = PrettyTable()
     table.field_names = [
         "NAME",
-        "STATE",
         "REFERENCED_ROLE",
         "REFERENCED_PROJECT",
         "UUID",
@@ -99,7 +151,6 @@ def get_acps(name, project_name, filter_by, limit, offset, quiet, out):
         table.add_row(
             [
                 highlight_text(row["name"]),
-                highlight_text(row["state"]),
                 highlight_text(role),
                 highlight_text(project_name),
                 highlight_text(metadata["uuid"]),
@@ -137,7 +188,7 @@ def create_acp(role, project, acp_users, acp_groups, name):
         LOG.error("ACP {} already exists.".format(acp_name))
         sys.exit(-1)
 
-    params = {"length": 1000}
+    params = {"length": 250}
     project_name_uuid_map = client.project.get_name_uuid_map(params)
 
     project_uuid = project_name_uuid_map.get(project, "")
@@ -183,21 +234,20 @@ def create_acp(role, project, acp_users, acp_groups, name):
         sys.exit(-1)
 
     role_cache_data = Cache.get_entity_data(entity_type=CACHE.ENTITY.ROLE, name=role)
-    role_uuid = role_cache_data["uuid"]
+    if not role_cache_data.get("uuid"):
+        LOG.error("Role with name {} not found".format(role))
+        sys.exit(-1)
+    role_uuid = role_cache_data.get("uuid")
 
-    # Check if there is an existing acp with given (project-role) tuple
-    params = {
-        "length": 1000,
-        "filter": "role_uuid=={};project_reference=={}".format(role_uuid, project_uuid),
-    }
-    res, err = client.acp.list(params)
+    limit = 250
+    res, err = get_acps_from_project(
+        client, project_uuid, role_uuid=role_uuid, limit=limit
+    )
     if err:
         return None, err
 
-    response = res.json()
-    entities = response.get("entities", None)
-
-    if entities:
+    entities = res.get("entities", None)
+    if res["metadata"]["total_matches"] > 0:
         LOG.error(
             "ACP {} already exists for given role in project".format(
                 entities[0]["status"]["name"]
@@ -209,11 +259,15 @@ def create_acp(role, project, acp_users, acp_groups, name):
 
     # Getting the cluster uuids for acp
     whitelisted_subnets = []
+    whiltelisted_clusters = []
     for subnet in project_resources.get("subnet_reference_list", []):
         whitelisted_subnets.append(subnet["uuid"])
 
     for subnet in project_resources.get("external_network_list", []):
         whitelisted_subnets.append(subnet["uuid"])
+
+    for cluster in project_resources.get("cluster_reference_list", []):
+        whiltelisted_clusters.append(cluster["uuid"])
 
     cluster_uuids = []
     for subnet_uuid in whitelisted_subnets:
@@ -221,8 +275,10 @@ def create_acp(role, project, acp_users, acp_groups, name):
             entity_type=CACHE.ENTITY.AHV_SUBNET, uuid=subnet_uuid
         )
 
-        cluster_uuids.append(subnet_cache_data["cluster_uuid"])
+        if subnet_cache_data.get("subnet_type", "VLAN") == "VLAN":
+            cluster_uuids.append(subnet_cache_data["cluster_uuid"])
 
+    cluster_uuids = list(set(whiltelisted_clusters) | set(cluster_uuids))
     # Default context for acp
     default_context = ACP.DEFAULT_CONTEXT
 
@@ -248,7 +304,10 @@ def create_acp(role, project, acp_users, acp_groups, name):
         entity_filter_expression_list = ACP.ENTITY_FILTER_EXPRESSION_LIST.CONSUMER
 
     elif role == "Operator" and cluster_uuids:
-        entity_filter_expression_list = ACP.ENTITY_FILTER_EXPRESSION_LIST.CONSUMER
+        entity_filter_expression_list = ACP.ENTITY_FILTER_EXPRESSION_LIST.OPERATOR
+
+    else:
+        entity_filter_expression_list = get_filters_custom_role(role_uuid, client)
 
     if cluster_uuids:
         entity_filter_expression_list.append(
@@ -318,11 +377,34 @@ def create_acp(role, project, acp_users, acp_groups, name):
     watch_task(res["status"]["execution_context"]["task_uuid"])
 
 
+def get_filters_custom_role(role_uuid, client):
+
+    role, err = client.role.read(id=role_uuid)
+    if err:
+        LOG.error("Couldn't fetch role with uuid {}, error: {}".format(role_uuid, err))
+        sys.exit(-1)
+    role = role.json()
+    permissions_list = (
+        role.get("status", {}).get("resources", {}).get("permission_reference_list", [])
+    )
+    permission_names = set()
+    for perm in permissions_list:
+        if perm:
+            perm_name = perm.get("name", "")
+            if perm_name:
+                permission_names.add(perm_name.lower())
+    entity_filter_expression_list = []
+    for perm_filter in ACP.CUSTOM_ROLE_PERMISSIONS_FILTERS:
+        if perm_filter.get("permission") in permission_names:
+            entity_filter_expression_list.append(perm_filter.get("filter"))
+    return entity_filter_expression_list
+
+
 def delete_acp(acp_name, project_name):
 
     client = get_api_client()
 
-    params = {"length": 1000}
+    params = {"length": 250, "filter": "name=={}".format(project_name)}
     project_name_uuid_map = client.project.get_name_uuid_map(params)
 
     project_uuid = project_name_uuid_map.get(project_name, "")
@@ -376,7 +458,7 @@ def describe_acp(acp_name, project_name, out):
 
     client = get_api_client()
 
-    params = {"length": 1000}
+    params = {"length": 250, "filter": "name=={}".format(project_name)}
     project_name_uuid_map = client.project.get_name_uuid_map(params)
 
     project_uuid = project_name_uuid_map.get(project_name, "")
@@ -384,14 +466,15 @@ def describe_acp(acp_name, project_name, out):
         LOG.error("Project '{}' not found".format(project_name))
         sys.exit(-1)
 
-    params = {
-        "length": 1000,
-        "filter": "(name=={});(project_reference=={})".format(acp_name, project_uuid),
-    }
-    acp_map = client.acp.get_name_uuid_map(params)
+    limit = 250
+    res, err = get_acps_from_project(
+        client, project_uuid, acp_name=acp_name, limit=limit
+    )
 
-    acp_uuid = acp_map.get(acp_name, "")
-    if not acp_uuid:
+    if err:
+        return None, err
+
+    if res["metadata"]["total_matches"] == 0:
         LOG.error(
             "No ACP found with name '{}' and project '{}'".format(
                 acp_name, project_name
@@ -399,6 +482,7 @@ def describe_acp(acp_name, project_name, out):
         )
         sys.exit(-1)
 
+    acp_uuid = res["entities"][0]["metadata"]["uuid"]
     LOG.info("Fetching acp {} details".format(acp_name))
     res, err = client.acp.read(acp_uuid)
     if err:
@@ -460,7 +544,7 @@ def update_acp(
 
     client = get_api_client()
 
-    params = {"length": 1000}
+    params = {"length": 250, "filter": "name=={}".format(project_name)}
     project_name_uuid_map = client.project.get_name_uuid_map(params)
 
     project_uuid = project_name_uuid_map.get(project_name, "")

@@ -42,6 +42,21 @@ class RUNLOG:
     ]
 
 
+class JOBS:
+    class STATES:
+        ACTIVE = "ACTIVE"
+        DELETED = "DELETED"
+        INACTIVE = "INACTIVE"
+
+
+class JOBINSTANCES:
+    class STATES:
+        SCHEDULED = "SCHEDULED"
+        RUNNING = "RUNNING"
+        SKIPPED = "SKIPPED"
+        FAILED = "FAILED"
+
+
 class RUNBOOK:
     class STATES:
         ACTIVE = "ACTIVE"
@@ -89,6 +104,7 @@ class APPLICATION:
         BUSY = "busy"
         TIMEOUT = "timeout"
         RESTARTING = "restarting"
+        UPDATING = "updating"
 
 
 class ACCOUNT:
@@ -137,6 +153,7 @@ class SYSTEM_ACTIONS:
     CREATE = "create"
     START = "start"
     RESTART = "restart"
+    UPDATE = "update"
     STOP = "stop"
     DELETE = "delete"
     SOFT_DELETE = "soft_delete"
@@ -227,6 +244,11 @@ class ACP:
                 "left_hand_side": {"entity_type": "app_variable"},
                 "right_hand_side": {"collection": "SELF_OWNED"},
             },
+            {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "virtual_network"},
+                "right_hand_side": {"collection": "ALL"},
+            },
         ]
 
         OPERATOR = [
@@ -272,6 +294,11 @@ class ACP:
                 "operator": "IN",
                 "left_hand_side": {"entity_type": "app_variable"},
                 "right_hand_side": {"collection": "SELF_OWNED"},
+            },
+            {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "virtual_network"},
+                "right_hand_side": {"collection": "ALL"},
             },
         ]
 
@@ -336,7 +363,127 @@ class ACP:
                 "left_hand_side": {"entity_type": "app_variable"},
                 "right_hand_side": {"collection": "SELF_OWNED"},
             },
+            {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "virtual_network"},
+                "right_hand_side": {"collection": "ALL"},
+            },
         ]
+
+    CUSTOM_ROLE_PERMISSIONS_FILTERS = [
+        {
+            "permission": "view_image",
+            "filter": {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "image"},
+                "right_hand_side": {"collection": "ALL"},
+            },
+        },
+        {
+            "permission": "view_app_icon",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "app_icon"},
+            },
+        },
+        {
+            "permission": "view_name_category",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "category"},
+            },
+        },
+        {
+            "permission": "create_or_update_name_category",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "category"},
+            },
+        },
+        {
+            "permission": "view_environment",
+            "filter": {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "environment"},
+                "right_hand_side": {"collection": "SELF_OWNED"},
+            },
+        },
+        {
+            "permission": "view_marketplace_item",
+            "filter": {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "marketplace_item"},
+                "right_hand_side": {"collection": "SELF_OWNED"},
+            },
+        },
+        {
+            "permission": "view_user",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "user"},
+            },
+        },
+        {
+            "permission": "view_user_group",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "user_group"},
+            },
+        },
+        {
+            "permission": "view_role",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "role"},
+            },
+        },
+        {
+            "permission": "view_directory_service",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "directory_service"},
+            },
+        },
+        {
+            "permission": "search_directory_service",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "directory_service"},
+            },
+        },
+        {
+            "permission": "view_identity_provider",
+            "filter": {
+                "operator": "IN",
+                "right_hand_side": {"collection": "ALL"},
+                "left_hand_side": {"entity_type": "identity_provider"},
+            },
+        },
+        {
+            "permission": "view_app_task",
+            "filter": {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "app_task"},
+                "right_hand_side": {"collection": "SELF_OWNED"},
+            },
+        },
+        {
+            "permission": "view_app_variable",
+            "filter": {
+                "operator": "IN",
+                "left_hand_side": {"entity_type": "app_variable"},
+                "right_hand_side": {"collection": "SELF_OWNED"},
+            },
+        },
+    ]
 
     DEFAULT_CONTEXT = {
         "scope_filter_expression_list": [

@@ -1,7 +1,7 @@
 import click
 
-from .accounts import get_accounts, delete_account, describe_account
-from .main import get, delete, describe
+from .accounts import get_accounts, delete_account, describe_account, sync_account
+from .main import get, delete, describe, sync
 
 
 @get.command("accounts")
@@ -25,7 +25,9 @@ from .main import get, delete, describe
     default=None,
     multiple=True,
     help="Search for accounts of specific provider",
-    type=click.Choice(["aws", "k8s", "vmware", "azure", "gcp", "nutanix"]),
+    type=click.Choice(
+        ["aws", "k8s", "vmware", "azure", "gcp", "nutanix", "custom_provider"]
+    ),
 )
 def _get_accounts(name, filter_by, limit, offset, quiet, all_items, account_type):
     """Get accounts, optionally filtered by a string"""
@@ -47,3 +49,12 @@ def _describe_account(account_name):
     """Describe a account"""
 
     describe_account(account_name)
+
+
+@sync.command("account", feature_min_version="3.0.0")
+@click.argument("account_name")
+def _sync_account(account_name):
+    """Sync a platform account
+    Args: account_name (string): name of the account to sync"""
+
+    sync_account(account_name)
